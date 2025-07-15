@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug Autenticazione TutUni AI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .token-box {
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            word-break: break-all;
+        }
+        .success { background: #d4edda; border-color: #c3e6cb; }
+        .error { background: #f8d7da; border-color: #f5c6cb; }
+        .info { background: #d1ecf1; border-color: #bee5eb; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .cookie-item {
+            background: #fff;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Debug Autenticazione TutUni AI</h1>
+    
+    <div class="info token-box">
+        <h3>ℹ️ Come Funziona NextAuth</h3>
+        <p>NextAuth memorizza i token in <strong>cookie HTTP-only</strong> per sicurezza. Questi cookie non sono visibili nel localStorage o sessionStorage, ma solo nel tab "Cookies" delle DevTools.</p>
+    </div>
+
+    <h2>1. 🍪 Cookie di Autenticazione</h2>
+    <button onclick="checkCookies()">Controlla Cookie NextAuth</button>
+    <div id="cookies-result"></div>
+
+    <h2>2. 🔐 Sessione NextAuth</h2>
+    <button onclick="checkNextAuthSession()">Controlla Sessione NextAuth</button>
+    <div id="session-result"></div>
+
+    <h2>3. 🌐 Test API con Token</h2>
+    <button onclick="testAPICall()">Test Chiamata API Progetti</button>
+    <div id="api-result"></div>
+
+    <h2>4. 📋 Local Storage (Non dovrebbe contenere token)</h2>
+    <button onclick="checkLocalStorage()">Controlla Local Storage</button>
+    <div id="localstorage-result"></div>
+
+    <h2>5. 🔧 Debug Avanzato</h2>
+    <button onclick="checkAllHeaders()">Controlla Headers HTTP</button>
+    <div id="headers-result"></div>
+
+    <script>
+        function checkCookies() {
+            const cookiesDiv = document.getElementById('cookies-result');
+            const cookies = document.cookie.split(';');
+            
+            let cookiesHtml = '<h4>Cookie Trovati:</h4>';
+            
+            if (cookies.length === 1 && cookies[0] === '') {
+                cookiesHtml += '<div class="token-box error">❌ Nessun cookie trovato. NextAuth potrebbe non essere configurato o non sei autenticato.</div>';
+            } else {
+                cookies.forEach(cookie => {
+                    const [name, value] = cookie.trim().split('=');
+                    const isAuthCookie = name.includes('next-auth') || name.includes('session') || name.includes('csrf');
+                    
+                    cookiesHtml += `
+                        <div class="cookie-item ${isAuthCookie ? 'success' : ''}">
+                            <strong>${name}:</strong> ${value ? value.substring(0, 50) + (value.length > 50 ? '...' : '') : 'vuoto'}
+                            ${isAuthCookie ? ' ✅ <em>Cookie di autenticazione</em>' : ''}
+                        </div>
+                    `;
+                });
+            }
+            
+            cookiesDiv.innerHTML = cookiesHtml;
+        }
+
+        async function checkNextAuthSession() {
+            const sessionDiv = document.getElementById('session-result');
+            
+            try {
+                sessionDiv.innerHTML = '<div class="info token-box">🔄 Controllando sessione NextAuth...</div>';
+                
+                const response = await fetch('/api/auth/session');
+                
+                if (response.ok) {
+                    const sessionData = await response.json();
+                    
+                    if (sessionData.authenticated) {
+                        sessionDiv.innerHTML = `
+                            <div class="token-box success">
+                                <h4>✅ Sessione Autenticata</h4>
+                                <p><strong>Utente:</strong> ${sessionData.user.name} (${sessionData.user.email})</p>
+                                <p><strong>Ruolo:</strong> ${sessionData.user.role}</p>
+                                <p><strong>ID:</strong> ${sessionData.user.id}</p>
+                                <p><strong>Scadenza:</strong> ${sessionData.sessionExpiry}</p>
+                            </div>
+                        `;
+                    } else {
+                        sessionDiv.innerHTML = '<div class="token-box error">❌ Nessuna sessione attiva. Effettua il login.</div>';
+                    }
+                } else {
+                    sessionDiv.innerHTML = `<div class="token-box error">❌ Errore nel controllo sessione: ${response.status}</div>`;
+                }
+            } catch (error) {
+                sessionDiv.innerHTML = `<div class="token-box error">❌ Errore: ${error.message}</div>`;
+            }
+        }
+
+        async function testAPICall() {
+            const apiDiv = document.getElementById('api-result');
+            
+            try {
+                apiDiv.innerHTML = '<div class="info token-box">🔄 Testando chiamata API...</div>';
+                
+                const response = await fetch('/api/projects');
+                
+                if (response.ok) {
+                    const projects = await response.json();
+                    apiDiv.innerHTML = `
+                        <div class="token-box success">
+                            <h4>✅ API Call Riuscita</h4>
+                            <p><strong>Progetti trovati:</strong> ${Array.isArray(projects) ? projects.length : 'N/A'}</p>
+                            <p><strong>Status:</strong> ${response.status}</p>
+                            <details>
+                                <summary>Dati ricevuti (clicca per vedere)</summary>
+                                <pre>${JSON.stringify(projects, null, 2)}</pre>
+                            </details>
+                        </div>
+                    `;
+                } else {
+                    const errorData = await response.text();
+                    apiDiv.innerHTML = `
+                        <div class="token-box error">
+                            <h4>❌ API Call Fallita</h4>
+                            <p><strong>Status:</strong> ${response.status}</p>
+                            <p><strong>Errore:</strong> ${errorData}</p>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                apiDiv.innerHTML = `<div class="token-box error">❌ Errore: ${error.message}</div>`;
+            }
+        }
+
+        function checkLocalStorage() {
+            const lsDiv = document.getElementById('localstorage-result');
+            
+            let lsHtml = '<h4>Local Storage Items:</h4>';
+            
+            if (localStorage.length === 0) {
+                lsHtml += '<div class="token-box info">✅ Local Storage vuoto (comportamento corretto per NextAuth)</div>';
+            } else {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    const value = localStorage.getItem(key);
+                    
+                    lsHtml += `
+                        <div class="cookie-item">
+                            <strong>${key}:</strong> ${value ? value.substring(0, 100) + (value.length > 100 ? '...' : '') : 'vuoto'}
+                        </div>
+                    `;
+                }
+            }
+            
+            lsDiv.innerHTML = lsHtml;
+        }
+
+        async function checkAllHeaders() {
+            const headersDiv = document.getElementById('headers-result');
+            
+            try {
+                headersDiv.innerHTML = '<div class="info token-box">🔄 Analizzando headers HTTP...</div>';
+                
+                const response = await fetch('/api/projects/test', {
+                    method: 'GET',
+                });
+                
+                const data = await response.json();
+                
+                headersDiv.innerHTML = `
+                    <div class="token-box ${data.hasSession ? 'success' : 'error'}">
+                        <h4>🔧 Debug Sessione Dettagliato</h4>
+                        <p><strong>Ha Sessione:</strong> ${data.hasSession ? '✅ Sì' : '❌ No'}</p>
+                        <p><strong>Utente Sessione:</strong> ${data.sessionUser ? JSON.stringify(data.sessionUser) : 'Nessuno'}</p>
+                        <p><strong>Ha Access Token:</strong> ${data.hasAccessToken ? '✅ Sì' : '❌ No'}</p>
+                        <p><strong>Lunghezza Token:</strong> ${data.accessTokenLength || 0} caratteri</p>
+                        <p><strong>Preview Token:</strong> <code>${data.accessTokenPreview || 'N/A'}</code></p>
+                        
+                        ${data.error ? `<p><strong>Errore:</strong> ${data.error}</p>` : ''}
+                    </div>
+                `;
+                
+            } catch (error) {
+                headersDiv.innerHTML = `<div class="token-box error">❌ Errore: ${error.message}</div>`;
+            }
+        }
+
+        // Carica automaticamente i cookie al caricamento della pagina
+        window.onload = function() {
+            checkCookies();
+        };
+    </script>
+</body>
+</html> 

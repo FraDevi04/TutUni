@@ -1,0 +1,73 @@
+[tool.poetry]
+name = "tutuni-ai-backend"
+version = "0.1.0"
+description = "TutUni AI Backend - FastAPI application for academic research assistance"
+authors = ["TutUni AI Team <dev@tutuni-ai.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.104.1"
+uvicorn = {extras = ["standard"], version = "^0.24.0"}
+python-multipart = "^0.0.6"
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+bcrypt = "^4.1.2"
+sqlalchemy = "^2.0.23"
+asyncpg = "^0.29.0"
+alembic = "^1.13.1"
+redis = "^5.0.1"
+anthropic = "^0.7.8"
+sentence-transformers = "^2.2.2"
+chromadb = "^0.4.18"
+pymupdf = "^1.23.14"
+python-docx = "^1.1.0"
+httpx = "^0.25.2"
+aiofiles = "^23.2.1"
+python-dotenv = "^1.0.0"
+pydantic = "^2.5.2"
+pydantic-settings = "^2.1.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+pytest-asyncio = "^0.21.1"
+black = "^23.11.0"
+isort = "^5.12.0"
+mypy = "^1.7.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true 

@@ -1,0 +1,216 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from datetime import datetime, timedelta
+from typing import Optional
+import jwt
+
+from app.core.database import get_async_session
+from app.core.config import settings
+from app.models.user import User, UserRole
+from app.schemas.auth import (
+    UserCreate, 
+    UserLogin, 
+    UserResponse, 
+    Token, 
+    TokenPayload
+)
+from app.services.auth_service import (
+    get_password_hash, 
+    verify_password, 
+    create_access_token,
+    decode_token
+)
+
+router = APIRouter()
+security = HTTPBearer()
+
+
+# Dependency to get current user
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_async_session)
+) -> User:
+    """Get current authenticated user"""
+    
+    print(f"[AUTH DEBUG] Received token: {credentials.credentials[:50]}...")
+    print(f"[AUTH DEBUG] Token length: {len(credentials.credentials)}")
+    
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Credenziali non valide",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
+    try:
+        payload = decode_token(credentials.credentials)
+        print(f"[AUTH DEBUG] Decoded payload: {payload}")
+        user_id = payload.get("sub")
+        print(f"[AUTH DEBUG] User ID from token: {user_id}")
+        if user_id is None:
+            raise credentials_exception
+    except jwt.PyJWTError as e:
+        print(f"[AUTH DEBUG] JWT decode error: {e}")
+        raise credentials_exception
+    
+    # Get user from database
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+    
+    if user is None or not user.is_active:
+        raise credentials_exception
+    
+    return user
+
+
+# Dependency to require pro user
+async def get_current_pro_user(
+    current_user: User = Depends(get_current_user)
+) -> User:
+    """Require current user to be pro"""
+    if not current_user.is_pro:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Accesso riservato agli utenti Pro"
+        )
+    return current_user
+
+
+@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    user_data: UserCreate,
+    db: AsyncSession = Depends(get_async_session)
+) -> UserResponse:
+    """Register a new user"""
+    
+    # Check if user already exists
+    result = await db.execute(select(User).where(User.email == user_data.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email già registrata"
+        )
+    
+    # Create new user
+    hashed_password = get_password_hash(user_data.password)
+    new_user = User(
+        email=user_data.email,
+        name=user_data.name,
+        hashed_password=hashed_password,
+        role=UserRole.FREE,
+        is_active=True,
+        is_verified=False  # In production, require email verification
+    )
+    
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+    
+    return UserResponse(
+        id=new_user.id,
+        email=new_user.email,
+        name=new_user.name,
+        role=new_user.role,
+        is_active=new_user.is_active,
+        is_verified=new_user.is_verified,
+        created_at=new_user.created_at
+    )
+
+
+@router.post("/login", response_model=Token)
+async def login(
+    user_credentials: UserLogin,
+    db: AsyncSession = Depends(get_async_session)
+) -> Token:
+    """Authenticate user and return JWT token"""
+    
+    # Find user by email
+    result = await db.execute(select(User).where(User.email == user_credentials.email))
+    user = result.scalar_one_or_none()
+    
+    if not user or not verify_password(user_credentials.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email o password non corretti",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account disattivato"
+        )
+    
+    # Update last login
+    user.last_login = datetime.utcnow()
+    await db.commit()
+    
+    # Create access token
+    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    )
+
+
+@router.get("/me", response_model=UserResponse)
+async def get_current_user_profile(
+    current_user: User = Depends(get_current_user)
+) -> UserResponse:
+    """Get current user profile"""
+    return UserResponse(
+        id=current_user.id,
+        email=current_user.email,
+        name=current_user.name,
+        role=current_user.role,
+        is_active=current_user.is_active,
+        is_verified=current_user.is_verified,
+        created_at=current_user.created_at,
+        documents_uploaded=current_user.documents_uploaded,
+        ai_questions_asked=current_user.ai_questions_asked,
+        ai_questions_today=current_user.ai_questions_today
+    )
+
+
+@router.post("/refresh", response_model=Token)
+async def refresh_token(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_async_session)
+) -> Token:
+    """Refresh access token"""
+    
+    try:
+        payload = decode_token(credentials.credentials)
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token non valido"
+            )
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token non valido"
+        )
+    
+    # Verify user still exists and is active
+    result = await db.execute(select(User).where(User.id == int(user_id)))
+    user = result.scalar_one_or_none()
+    
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Utente non trovato o disattivato"
+        )
+    
+    # Create new access token
+    access_token = create_access_token(data={"sub": str(user.id), "email": user.email})
+    
+    return Token(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    ) 
